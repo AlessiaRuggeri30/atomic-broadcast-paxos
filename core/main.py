@@ -1,6 +1,6 @@
 import json
 
-from classes import *
+from core.classes import *
 
 LEADER = ""
 
