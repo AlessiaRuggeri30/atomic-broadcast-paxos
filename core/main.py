@@ -25,10 +25,12 @@ print(config)
 
 network = {'clients': [], 'proposers': [], 'acceptors': [], 'learners': []}
 for agent in config:
-    a = Agent(agent[0], agent[1], agent[2])
+    a = Agent(agent[0], agent[1], int(agent[2]))
     network[a.role].append(a)
 
-print(network)
+for role in ['clients', 'proposers', 'acceptors', 'learners']:
+    for agent in network[role]:
+        agent.update_network(network)
 
 
 

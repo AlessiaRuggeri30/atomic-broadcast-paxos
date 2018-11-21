@@ -1,4 +1,4 @@
-clients 239.0.0.1 5000
-proposers 239.0.0.1 6000
-acceptors 239.0.0.1 7000
-learners 239.0.0.1 8000
+clients localhost 5000
+proposers localhost 6000
+acceptors localhost 7000
+learners localhost 8000
