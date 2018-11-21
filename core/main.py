@@ -2,6 +2,7 @@ import json
 
 from core.classes import *
 
+CONFIG_FILE = "config.txt"
 LEADER = ""
 
 
@@ -14,28 +15,20 @@ def leader_election():
     pass
 
 
-# Read config.json
-with open('config.json', 'r') as f:
-    config = json.load(f)
+config = []
+with open(CONFIG_FILE, 'r') as f:
+    for line in f.readlines():
+        role, ip, port = line.strip('\n').split(' ')
+        config.append([role, ip, port])
 
-# Write back to config.json
-# with open('config.json', 'w') as f:
-#     json.dump(config, f)
+print(config)
 
+network = {'clients': [], 'proposers': [], 'acceptors': [], 'learners': []}
+for agent in config:
+    a = Agent(agent[0], agent[1], agent[2])
+    network[a.role].append(a)
 
-def create_m(phase, c_rnd=None, c_val=None, rnd=None, v_rnd=None, v_val=None):
-    if phase in ["1A", "1B", "2A", "2B", "DECISION"]:
-        return {"phase": phase, "c_rnd": c_rnd, "c_val": c_val, "rnd": rnd, "v_rnd": v_rnd, "v_val": v_val}
-
-
-proposer = Proposer(1)
-
-acceptor = Acceptor(1)
-
-m = create_m("1A", c_rnd=4)
-msg = proposer.send_msg(m, acceptor)
-acceptor.receive_msg(msg)
-print(acceptor.msgbox.pop().read())
+print(network)
 
 
 
