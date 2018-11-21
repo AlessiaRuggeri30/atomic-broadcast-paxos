@@ -138,7 +138,7 @@ class Msgbox:
         self.received.append(msg)
 
     def pop(self):
-        return self.pop(0)
+        return self.received.pop(0)
 
 
 
