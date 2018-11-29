@@ -236,11 +236,11 @@ class Proposer(Agent):
         if self.states[instance]['quorum2B'] >= math.ceil(3 / 2):
             self.states[instance]['quorum2B'] = 0  # reset quorum
 
-        msg = Msg(instance)
-        msg.fill_DECISION(self.states[instance]['c_val'])
-        msg_encoded = msg.encode()
-        print(f"{self} sends msg {msg} to learners")
-        self.send_msg(self.network['learners']['ip'], self.network['learners']['port'], msg_encoded)
+            msg = Msg(instance)
+            msg.fill_DECISION(self.states[instance]['c_val'])
+            msg_encoded = msg.encode()
+            print(f"{self} sends msg {msg} to learners")
+            self.send_msg(self.network['learners']['ip'], self.network['learners']['port'], msg_encoded)
 
     def receive_msg(self, msg):
         # encoded_msg, address = self.server.recvfrom(1024)
