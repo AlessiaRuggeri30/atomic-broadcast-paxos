@@ -7,7 +7,11 @@ import math
 CONFIG_FILE = "config.txt"
 
 
-# Utils functions
+# ----------------------------------------------------------------------------------------------------
+#
+# UTILS FUNCTIONS
+#
+# ----------------------------------------------------------------------------------------------------
 
 
 def greedy_leader_election(network):
@@ -37,7 +41,12 @@ def create_network(config):
     return network
 
 
-# Handling messages
+# ----------------------------------------------------------------------------------------------------
+#
+# HANDLING MESSAGES
+#
+# ----------------------------------------------------------------------------------------------------
+
 
 class Msg():
 
@@ -57,7 +66,7 @@ class Msg():
         return self
 
     def __str__(self):
-        return str((self.phase, self.data))
+        return str((self.instance, self.phase, self.data))
 
     def fill_REQUEST(self, v):
         self.phase = "REQUEST"
@@ -84,21 +93,11 @@ class Msg():
         self.data = {"v_val": v_val}
 
 
-class Msgbox():
-
-    ''' Class representing the list of message that an agent received '''
-
-    def __init__(self):
-        self.received = []
-
-    def push(self, msg):
-        self.received.append(msg)
-
-    def pop(self):
-        return self.received.pop(0)
-
-
-# Agent and roles
+# ----------------------------------------------------------------------------------------------------
+#
+# AGENTS AND ROLES
+#
+# ----------------------------------------------------------------------------------------------------
 
 
 class Agent(Process):
@@ -111,9 +110,6 @@ class Agent(Process):
         self.ip = ip
         self.port = port
         self.p_id = p_id
-        self.leader = False
-        self.msgbox = Msgbox()
-        self.index = 0        # id of next sent message
         self.server = self.setup_server()
         self.client = self.setup_client()
         self.network = network
@@ -147,7 +143,7 @@ class Agent(Process):
 
     def run(self):
         self.server.bind((self.ip, self.port))
-        print(f"Process ({self}) is listening")
+        print(f"{self} is listening")
         while True:
             encoded_msg, address = self.server.recvfrom(1024)
             msg = Msg()
@@ -165,26 +161,34 @@ class Agent(Process):
 class Client(Agent):
 
     def __init__(self, *args, **kwargs):
-        Agent.__init__(self, role="proposers", *args, **kwargs)
+        Agent.__init__(self, role="clients", *args, **kwargs)
         self.num_instance = 0
+
+    def run(self):
+        while True:
+            v = input("Request's value: ")
+            self.request(v)
 
     def request(self, v):
         msg = Msg(self.num_instance)
         self.num_instance += 1
         msg_encoded = msg.encode()
         # send num instance to all other clients to update:
-        self.send_msg(self.network['clients'].ip, self.network['clients'].port, msg_encoded)
+        print(f"{self} sends num_instance to all other clients to update")
+        self.send_msg(self.network['clients']['ip'], self.network['clients']['port'], msg_encoded)
 
         msg.fill_REQUEST(v)
         msg_encoded = msg.encode()
-        self.send_msg(self.network['proposers'].ip, self.network['proposers'].port, msg_encoded)
+        print(f"{self} sends request msg {msg} to proposers")
+        self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
 
-    def receive_msg(self, msg):
-        encoded_msg, address = self.server.recvfrom(1024)
-        msg = Msg()
-        msg.decode(encoded_msg)
-        if msg.instance > self.num_instance:
-            self.num_instance = msg.instance
+    # def receive_msg(self, msg):
+    #     encoded_msg, address = self.server.recvfrom(1024)
+    #     msg = Msg()
+    #     msg.decode(encoded_msg)
+    #     if msg.instance > self.num_instance:
+    #         print(f"{self} updates its num_instance value")
+    #         self.num_instance = msg.instance
 
 
 class Proposer(Agent):
@@ -194,6 +198,7 @@ class Proposer(Agent):
     def __init__(self, *args, **kwargs):
         Agent.__init__(self, role="proposers", *args, **kwargs)
         self.states = {}
+        self.leader = False
 
     def create_state(self, instance):
         if instance not in self.states:
@@ -204,7 +209,8 @@ class Proposer(Agent):
         msg.fill_PHASE_1A(self.states[instance]['c_rnd'])
         msg_encoded = msg.encode()
         self.states[instance]['c_rnd'] += 1
-        self.send_msg(self.network['acceptors'].ip, self.network['acceptors'].port, msg_encoded)
+        print(f"{self} sends msg {msg} to acceptors")
+        self.send_msg(self.network['acceptors']['ip'], self.network['acceptors']['port'], msg_encoded)
 
     def phase_2A(self, instance, k, data):
         self.states[instance]['quorum1B'] += 1
@@ -221,7 +227,8 @@ class Proposer(Agent):
             msg = Msg(instance)
             msg.fill_PHASE_2A(self.states[instance]['c_rnd'], self.states[instance]['c_val'])
             msg_encoded = msg.encode()
-            self.send_msg(self.network['acceptors'].ip, self.network['acceptors'].port, msg_encoded)
+            print(f"{self} sends msg {msg} to acceptors")
+            self.send_msg(self.network['acceptors']['ip'], self.network['acceptors']['port'], msg_encoded)
 
     def decide(self, instance, data):
         if data['v_rnd'] == self.states[instance]['c_rnd']:
@@ -232,16 +239,20 @@ class Proposer(Agent):
         msg = Msg(instance)
         msg.fill_DECISION(self.states[instance]['c_val'])
         msg_encoded = msg.encode()
-        self.send_msg(self.network['learners'].ip, self.network['learners'].port, msg_encoded)
+        print(f"{self} sends msg {msg} to learners")
+        self.send_msg(self.network['learners']['ip'], self.network['learners']['port'], msg_encoded)
 
     def receive_msg(self, msg):
-        encoded_msg, address = self.server.recvfrom(1024)
-        msg = Msg()
-        msg.decode(encoded_msg)
+        # encoded_msg, address = self.server.recvfrom(1024)
+        # msg = Msg()
+        # msg.decode(encoded_msg)
+        print(f"{self} receives msg {msg}")
 
         self.create_state(msg.instance)
 
         if msg.phase == "REQUEST":
+            if self.leader:
+                print("I am the leader.")
             self.states[msg.instance]['v'] = msg.data['v']
             if self.leader:
                 self.phase_1A(msg.instance)
@@ -267,64 +278,64 @@ class Acceptor(Agent):
             self.states[instance] = {"rnd": 0, "v_rnd": 0, "v_val": None}
 
     def phase_1B(self, instance, data):
-        if data['r_cnd'] > self.states[instance]['rnd']:
-            self.states[instance]['rnd'] = data['r_cnd']
+        if data['c_rnd'] > self.states[instance]['rnd']:
+            self.states[instance]['rnd'] = data['c_rnd']
 
         msg = Msg(instance)
         msg.fill_PHASE_1B(self.states[instance]['rnd'], self.states[instance]['v_rnd'], self.states[instance]['v_val'])
         msg_encoded = msg.encode()
-        self.send_msg(self.network['proposers'].ip, self.network['proposers'].port, msg_encoded)
+        print(f"{self} sends msg {msg} to proposers")
+        self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
 
     def phase_2B(self, instance, data):
-        if data['r_cnd'] > self.states[instance]['rnd']:
-            self.states[instance]['v_rnd'] = data['r_cnd']
+        if data['c_rnd'] > self.states[instance]['rnd']:
+            self.states[instance]['v_rnd'] = data['c_rnd']
             self.states[instance]['v_val'] = data['c_val']
 
         msg = Msg(instance)
         msg.fill_PHASE_2B(self.states[instance]['v_rnd'], self.states[instance]['v_val'])
         msg_encoded = msg.encode()
-        self.send_msg(self.network['proposers'].ip, self.network['proposers'].port, msg_encoded)
+        print(f"{self} sends msg {msg} to proposers")
+        self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
 
     def receive_msg(self, msg):
-        encoded_msg, address = self.server.recvfrom(1024)
-        msg = Msg()
-        msg.decode(encoded_msg)
+        # encoded_msg, address = self.server.recvfrom(1024)
+        # msg = Msg()
+        # msg.decode(encoded_msg)
+        print(f"{self} receives msg {msg}")
 
         self.create_state(msg.instance)
 
         if msg.phase == "PHASE_1A":
-            if self.leader:
-                self.phase_1B(msg.instance, msg.data)
+            self.phase_1B(msg.instance, msg.data)
         elif msg.phase == "PHASE_2A":
-            if self.leader:
-                self.phase_2B(msg.instance, msg.data)
+            self.phase_2B(msg.instance, msg.data)
 
 
 class Learner(Agent):
 
     ''' Class representing learner agent '''
 
+    def __init__(self, *args, **kwargs):
+        Agent.__init__(self, role="learners", *args, **kwargs)
+        self.states = {}
+
+    def create_state(self, instance):
+        if instance not in self.states:
+            self.states[instance] = {'v': None}
+
     def receive_msg(self, msg):
-        pass
+        # encoded_msg, address = self.server.recvfrom(1024)
+        # msg = Msg()
+        # msg.decode(encoded_msg)
+        print(f"{self} receives msg {msg}")
 
+        self.create_state(msg.instance)
+        self.states[msg.instance]['v'] = msg.data['v_val']
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+        for instance in range(0, len(self.states)):
+            print(self.states[instance])
+        print()
 
 
 
