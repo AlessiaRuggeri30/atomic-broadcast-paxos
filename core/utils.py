@@ -124,7 +124,7 @@ class Agent(Process):
     def __repr__(self):
         return self.__str__()
 
-    def create_state(self, instance, v):
+    def create_state(self, instance):
         # to implement by subclasses
         pass
 
@@ -195,9 +195,9 @@ class Proposer(Agent):
         Agent.__init__(self, role="proposers", *args, **kwargs)
         self.states = {}
 
-    def create_state(self, instance, v):
+    def create_state(self, instance):
         if instance not in self.states:
-            self.states[instance] = {"c_rnd": 0, "c_val": None, "v": v, "quorum1B": 0, "quorum2B": 0}
+            self.states[instance] = {"c_rnd": 0, "c_val": None, "v": None, "quorum1B": 0, "quorum2B": 0}
 
     def phase_1A(self, instance):
         msg = Msg(instance)
@@ -239,8 +239,10 @@ class Proposer(Agent):
         msg = Msg()
         msg.decode(encoded_msg)
 
+        self.create_state(msg.instance)
+
         if msg.phase == "REQUEST":
-            self.create_state(msg.instance, msg.data['v'])
+            self.states[msg.instance]['v'] = msg.data['v']
             if self.leader:
                 self.phase_1A(msg.instance)
         elif msg.phase == "PHASE_1B":
@@ -258,12 +260,44 @@ class Acceptor(Agent):
 
     def __init__(self, *args, **kwargs):
         Agent.__init__(self, role="acceptors", *args, **kwargs)
-        self.rnd = 0
-        self.v_rnd = 0
-        self.v_val = None
+        self.states = {}
+
+    def create_state(self, instance):
+        if instance not in self.states:
+            self.states[instance] = {"rnd": 0, "v_rnd": 0, "v_val": None}
+
+    def phase_1B(self, instance, data):
+        if data['r_cnd'] > self.states[instance]['rnd']:
+            self.states[instance]['rnd'] = data['r_cnd']
+
+        msg = Msg(instance)
+        msg.fill_PHASE_1B(self.states[instance]['rnd'], self.states[instance]['v_rnd'], self.states[instance]['v_val'])
+        msg_encoded = msg.encode()
+        self.send_msg(self.network['proposers'].ip, self.network['proposers'].port, msg_encoded)
+
+    def phase_2B(self, instance, data):
+        if data['r_cnd'] > self.states[instance]['rnd']:
+            self.states[instance]['v_rnd'] = data['r_cnd']
+            self.states[instance]['v_val'] = data['c_val']
+
+        msg = Msg(instance)
+        msg.fill_PHASE_2B(self.states[instance]['v_rnd'], self.states[instance]['v_val'])
+        msg_encoded = msg.encode()
+        self.send_msg(self.network['proposers'].ip, self.network['proposers'].port, msg_encoded)
 
     def receive_msg(self, msg):
-        pass
+        encoded_msg, address = self.server.recvfrom(1024)
+        msg = Msg()
+        msg.decode(encoded_msg)
+
+        self.create_state(msg.instance)
+
+        if msg.phase == "PHASE_1A":
+            if self.leader:
+                self.phase_1B(msg.instance, msg.data)
+        elif msg.phase == "PHASE_2A":
+            if self.leader:
+                self.phase_2B(msg.instance, msg.data)
 
 
 class Learner(Agent):
