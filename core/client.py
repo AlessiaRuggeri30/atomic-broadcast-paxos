@@ -1,14 +1,9 @@
 from utils import *
-import sys
+from paxos import *
 
-config = import_config(CONFIG_FILE)
+config, MAX_NUM_ACCEPTORS = import_config(CONFIG_FILE)
 network = create_network(config)
-
-p_id = None
-try:
-    p_id = sys.argv[1]
-except IndexError as error:
-    print("You have to specify the process id as argument.")
+p_id = get_id()
 
 client = Client(ip=network['clients']['ip'],
                 port=network['clients']['port'],
