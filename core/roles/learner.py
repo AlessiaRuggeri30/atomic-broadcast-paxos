@@ -1,5 +1,5 @@
 from utils import *
-from paxos import *
+from classes import *
 
 config, MAX_NUM_ACCEPTORS = import_config(CONFIG_FILE)
 network = create_network(config)

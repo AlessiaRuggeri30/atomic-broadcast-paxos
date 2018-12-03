@@ -1,7 +1,5 @@
 import sys
 
-CONFIG_FILE = "config.txt"
-
 
 # ----------------------------------------------------------------------------------------------------
 #
@@ -29,7 +27,8 @@ def import_config(config_file):
                 config.append([role, ip, port])
             else:
                 _, value = line.strip('\n').split(' ')
-                MAX_NUM_ACCEPTORS = int(value)
+                if value != '':
+                    MAX_NUM_ACCEPTORS = int(value)
             k += 1
     return config, MAX_NUM_ACCEPTORS
 
@@ -44,10 +43,10 @@ def create_network(config):
     return network
 
 
-def get_id():
-    p_id = None
-    try:
-        p_id = sys.argv[1]
-    except IndexError:
-        print("You have to specify the process id as argument.")
-    return int(p_id)
+# def get_id():
+#     p_id = None
+#     try:
+#         p_id = sys.argv[1]
+#     except IndexError:
+#         print("You have to specify the process id as argument.")
+#     return int(p_id)
