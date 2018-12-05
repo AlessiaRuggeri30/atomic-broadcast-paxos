@@ -1,4 +1,5 @@
 from threading import Thread
+import time
 import socket
 import struct
 import json
@@ -56,6 +57,11 @@ class Msg():
     def fill_DECISION(self, v_val):
         self.phase = "DECISION"
         self.data = {"v_val": v_val}
+
+    def fill_leader_sender(self, p_id):
+        self.phase = "leader_sender"
+        self.data = {"p_id": p_id}
+
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -149,9 +155,44 @@ class Proposer(Agent):
     def __init__(self, *args, **kwargs):
         Agent.__init__(self, role="proposers", *args, **kwargs)
         self.states = {}
-        self.leader = False
+        self.leader = True
         self.num_instance = 0
         self.max_num_acceptors = 3
+
+        self.leader_sender = Thread(target=self.leader_sender)
+        self.leader_listener = Thread(target=self.leader_listener)
+        self.leader_sender.daemon = True
+        self.leader_listener.daemon = True
+        self.leader_sender_interval = 1
+        self.leader_sender_interval = 3
+        self.last_msg_leader_time = None
+
+    def run(self):
+        if not self.leader_sender.is_alive():
+            self.leader_sender.start()
+        if not self.leader_listener.is_alive():
+            self.leader_listener.start()
+        super().run()
+
+    def leader_sender(self):
+        while True:
+            time.sleep(self.leader_sender_interval)
+            if self.leader:
+                msg = Msg()
+                msg.fill_leader_sender(self.p_id)
+                msg_encoded = msg.encode()
+                print_stuff(f"{self} sends msg: I AM THE LEADER")
+                self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
+
+    def leader_listener(self):
+        while True:
+            if self.last_msg_leader_time is not None:
+                current_time = time.time()
+                interval = current_time - self.last_msg_leader_time
+                if not self.leader:
+                    if interval > self.leader_sender_interval:
+                        print_stuff("Probably leader is dead")
+                        self.leader = True
 
     def create_state(self, instance):
         if instance not in self.states:
@@ -216,6 +257,11 @@ class Proposer(Agent):
         elif msg.phase == "PHASE_2B":
             if self.leader:
                 self.decide(msg.instance, msg.data)
+        elif msg.phase == "leader_sender":
+            self.last_msg_leader_time = time.time()
+            if msg.data['p_id'] > self.p_id:
+                self.leader = False
+            print(f"--- Am I the leader? {self.leader}")
 
 
 class Acceptor(Agent):

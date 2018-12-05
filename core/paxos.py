@@ -22,8 +22,6 @@ def proposer(network, p_id):
                         network=network)
 
     proposer.max_num_acceptors = 3      # if you want more, change here
-    if proposer.p_id == 1:
-        proposer.leader = True
 
     proposer.start()
 
