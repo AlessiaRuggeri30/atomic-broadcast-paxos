@@ -22,8 +22,10 @@ def proposer(network, p_id):
                         network=network)
 
     proposer.max_num_acceptors = 3      # for now is hardcoded
-    if proposer.p_id == 0:
+    if proposer.p_id == 1:
         proposer.leader = True
+
+    proposer.start()
 
 
 def acceptor(network, p_id):

@@ -154,27 +154,31 @@ class Proposer(Agent):
 
     def create_state(self, instance):
         if instance not in self.states:
-            self.states[instance] = {"c_rnd": 0, "c_val": None, "v": None, "quorum1B": 0, "quorum2B": 0}
+            self.states[instance] = {"c_rnd": 0, "c_val": None, "v": None,
+                                     "max_v_rnd": 0, "max_v_val": 0,
+                                     "quorum1B": 0, "quorum2B": 0}
 
     def phase_1A(self, instance):
+        self.states[instance]['c_rnd'] = 1 * self.p_id
         msg = Msg(instance)
         msg.fill_PHASE_1A(self.states[instance]['c_rnd'])
         msg_encoded = msg.encode()
-        self.states[instance]['c_rnd'] += 1
         print(f"{self} sends msg {msg} to acceptors")
         self.send_msg(self.network['acceptors']['ip'], self.network['acceptors']['port'], msg_encoded)
 
-    def phase_2A(self, instance, k, data):
-        self.states[instance]['quorum1B'] += 1
-        if data['v_rnd'] >= k:
-            k = data['v_rnd']
-            V = data['v_val']
+    def phase_2A(self, instance, data):
+        if data['rnd'] == self.states[instance]['c_rnd']:
+            self.states[instance]['quorum1B'] += 1
+        print(self.states[instance]['max_v_rnd'])
+        if data['v_rnd'] >= self.states[instance]['max_v_rnd']:
+            self.states[instance]['max_v_rnd'] = data['v_rnd']
+            self.states[instance]['max_v_val'] = data['v_val']
         if self.states[instance]['quorum1B'] >= math.ceil((self.max_num_acceptors+1) / 2):  # if it has quorum of acceptors
             self.states[instance]['quorum1B'] = 0  # reset quorum
-            if k == 0:
+            if self.states[instance]['max_v_rnd'] == 0:
                 self.states[instance]['c_val'] = self.states[instance]['v']
             else:
-                self.states[instance]['c_val'] = V
+                self.states[instance]['c_val'] = self.states[instance]['max_v_val']
 
             msg = Msg(instance)
             msg.fill_PHASE_2A(self.states[instance]['c_rnd'], self.states[instance]['c_val'])
@@ -207,8 +211,7 @@ class Proposer(Agent):
             self.num_instance += 1
         elif msg.phase == "PHASE_1B":
             if self.leader:
-                k = 0
-                self.phase_2A(msg.instance, k, msg.data)
+                self.phase_2A(msg.instance, msg.data)
         elif msg.phase == "PHASE_2B":
             if self.leader:
                 self.decide(msg.instance, msg.data)
@@ -227,7 +230,7 @@ class Acceptor(Agent):
             self.states[instance] = {"rnd": 0, "v_rnd": 0, "v_val": None}
 
     def phase_1B(self, instance, data):
-        if data['c_rnd'] > self.states[instance]['rnd']:
+        if data['c_rnd'] >= self.states[instance]['rnd']:
             self.states[instance]['rnd'] = data['c_rnd']
 
         msg = Msg(instance)
@@ -237,7 +240,7 @@ class Acceptor(Agent):
         self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
 
     def phase_2B(self, instance, data):
-        if data['c_rnd'] > self.states[instance]['rnd']:
+        if data['c_rnd'] >= self.states[instance]['rnd']:
             self.states[instance]['v_rnd'] = data['c_rnd']
             self.states[instance]['v_val'] = data['c_val']
 
@@ -251,6 +254,7 @@ class Acceptor(Agent):
         print(f"{self} receives msg {msg}")
 
         self.create_state(msg.instance)
+        print(self.states[msg.instance])
 
         if msg.phase == "PHASE_1A":
             self.phase_1B(msg.instance, msg.data)
