@@ -4,7 +4,7 @@ from classes import *
 
 
 def client(network, p_id):
-    print('-> client ', id)
+    print('-> client ', p_id)
     client = Client(ip=network['clients']['ip'],
                     port=network['clients']['port'],
                     p_id=int(p_id),
@@ -15,13 +15,13 @@ def client(network, p_id):
 
 
 def proposer(network, p_id):
-    print('-> proposer', id)
+    print('-> proposer', p_id)
     proposer = Proposer(ip=network['proposers']['ip'],
                         port=network['proposers']['port'],
                         p_id=int(p_id),
                         network=network)
 
-    proposer.max_num_acceptors = 3      # for now is hardcoded
+    proposer.max_num_acceptors = 3      # if you want more, change here
     if proposer.p_id == 1:
         proposer.leader = True
 
@@ -29,7 +29,7 @@ def proposer(network, p_id):
 
 
 def acceptor(network, p_id):
-    print('-> acceptor', id)
+    print('-> acceptor', p_id)
     acceptor = Acceptor(ip=network['acceptors']['ip'],
                         port=network['acceptors']['port'],
                         p_id=int(p_id),
@@ -39,7 +39,7 @@ def acceptor(network, p_id):
 
 
 def learner(network, p_id):
-    print('-> learner ', id)
+    print('-> learner ', p_id)
     learner = Learner(ip=network['learners']['ip'],
                       port=network['learners']['port'],
                       p_id=int(p_id),
@@ -53,7 +53,7 @@ if __name__ == '__main__':
     role = sys.argv[2]
     p_id = int(sys.argv[3])
 
-    config, MAX_NUM_ACCEPTORS = import_config(CONFIG_FILE)
+    config = import_config(CONFIG_FILE)
     network = create_network(config)
 
     if role == 'acceptor':
