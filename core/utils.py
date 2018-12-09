@@ -7,7 +7,7 @@ import sys
 #
 # ----------------------------------------------------------------------------------------------------
 
-PRINTING = True
+PRINTING = False
 
 
 def greedy_leader_election(network):

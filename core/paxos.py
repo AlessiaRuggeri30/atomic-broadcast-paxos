@@ -2,6 +2,8 @@
 from utils import *
 from classes import *
 
+MAX_NUM_ACCEPTORS = 3       # if you want more, change here
+
 
 def client(network, p_id):
     print('-> client ', p_id)
@@ -21,7 +23,7 @@ def proposer(network, p_id):
                         p_id=int(p_id),
                         network=network)
 
-    proposer.max_num_acceptors = 3      # if you want more, change here
+    proposer.max_num_acceptors = MAX_NUM_ACCEPTORS
 
     proposer.start()
 
@@ -42,6 +44,8 @@ def learner(network, p_id):
                       port=network['learners']['port'],
                       p_id=int(p_id),
                       network=network)
+
+    learner.max_num_acceptors = MAX_NUM_ACCEPTORS
 
     learner.start()
 

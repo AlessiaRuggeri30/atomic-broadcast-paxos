@@ -169,7 +169,7 @@ class Proposer(Agent):
         self.leader_sender.daemon = True
         self.leader_listener.daemon = True
         self.leader_sender_interval = 1
-        self.leader_sender_interval = 3
+        self.leader_listener_interval = 2
         self.last_msg_leader_time = None
 
     def catch_up_request(self):
@@ -209,7 +209,7 @@ class Proposer(Agent):
                 current_time = time.time()
                 interval = current_time - self.last_msg_leader_time
                 if not self.leader:
-                    if interval > self.leader_sender_interval:
+                    if interval > self.leader_listener_interval:
                         print_stuff("Probably leader is dead")
                         self.leader = True
 
@@ -270,7 +270,6 @@ class Proposer(Agent):
             if self.leader and self.updated:
                 self.phase_1A(self.num_instance)
             self.num_instance += 1
-            print(f"{self} has num instance: {self.num_instance}")
         elif msg.phase == "PHASE_1B":
             if self.leader:
                 self.phase_2A(msg.instance, msg.data)
@@ -333,11 +332,11 @@ class Acceptor(Agent):
             msg_encoded = msg.encode()
             print_stuff(f"{self} sends msg {msg} to proposers")
             self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
-        elif role == "acceptors":
+        elif role == "learners":
             msg = Msg()
             msg.fill_catch_up(states=self.states)
             msg_encoded = msg.encode()
-            self.send_msg(self.network['acceptors']['ip'], self.network['acceptors']['port'], msg_encoded)
+            self.send_msg(self.network['learners']['ip'], self.network['learners']['port'], msg_encoded)
 
     def receive_msg(self, msg):
         print_stuff(f"{self} receives msg {msg}")
@@ -359,6 +358,8 @@ class Learner(Agent):
     def __init__(self, *args, **kwargs):
         Agent.__init__(self, role="learners", *args, **kwargs)
         self.states = {}
+        self.acceptor_states = {}
+        self.max_num_acceptors = 3
         self.can_deliver = True
         self.last_delivered = -1
         self.catch_up_counter = 0
@@ -370,37 +371,60 @@ class Learner(Agent):
             print_stuff(f"{self} sends catch up request to acceptors")
             self.send_msg(self.network['acceptors']['ip'], self.network['acceptors']['port'], msg_encoded)
 
+    # def run(self):
+    #     self.server.bind((self.ip, self.port))
+    #     print_stuff(f"{self} is listening")
+    #     self.catch_up_request()
+    #     while True:
+    #         encoded_msg, address = self.server.recvfrom(1024)
+    #         msg = Msg()
+    #         msg.decode(encoded_msg)
+    #         self.receive_msg(msg)
+
     def update_state(self, instance):
         if instance is not None and instance not in self.states:
             self.states[instance] = {'v': None}
-        for i in range(0, instance):
-            if instance not in self.states:
-                self.can_deliver = False
-        print(f"Can deliver? {self.can_deliver}")
-        if not self.can_deliver:
-            self.catch_up_request()
+
+    def deliver(self, instance):
+        for i in range((self.last_delivered + 1), (instance + 1)):
+            print_stuff(f"Instance {i}:")
+            print(self.states[i]['v'])
+        self.last_delivered = instance
+
+    def catch_up_update(self, acceptor_states):
+        self.catch_up_counter += 1
+        for instance in acceptor_states:
+            if instance is not None:
+                if instance not in self.acceptor_states:
+                    self.acceptor_states[instance] = acceptor_states[instance]
+                elif acceptor_states[instance]['v_rnd'] >= self.acceptor_states[instance]['v_rnd']:
+                    self.acceptor_states[instance] = acceptor_states[instance]
+
+        if self.catch_up_counter == math.ceil((self.max_num_acceptors + 1) / 2):
+            self.catch_up_counter = 0
+            for instance in self.acceptor_states:
+                if instance is not None and int(instance) not in self.states:
+                    self.states[int(instance)] = {'v': acceptor_states[instance]['v_val']}
+            self.can_deliver = True
+            print_stuff("I'm updated")
 
     def receive_msg(self, msg):
         print_stuff(f"{self} receives msg {msg}")
 
-        self.update_state(msg.instance)
-        self.states[msg.instance]['v'] = msg.data['v_val']
-
-        if msg.phase == "DECISION" and self.can_deliver:
-            for i in range((self.last_delivered+1), (msg.instance+1)):
-                print_stuff(f"Instance {i}:")
-                print(self.states[i]['v'])
-            self.last_delivered = msg.instance
+        if msg.phase == "DECISION":
+            for i in range(0, msg.instance):
+                if i not in self.states:
+                    self.can_deliver = False
+            print_stuff(f"Can deliver? {self.can_deliver}")
+            if self.can_deliver:
+                self.update_state(msg.instance)
+                self.states[msg.instance]['v'] = msg.data['v_val']
+                self.deliver(msg.instance)
+            else:
+                self.catch_up_request()
         elif msg.phase == "catch_up":
-            self.catch_up_counter += 1
-            for instance in msg.data['states']:
-                if instance is not None and instance not in self.states:
-                    pass
-            # if msg.data['num_instance'] > self.num_instance:
-            #     self.num_instance = msg.data['num_instance']
-            # if self.catch_up_counter == math.ceil((self.max_num_acceptors + 1) / 2):
-            #     self.catch_up_counter = 0
-            #     self.updated = True
-            #     print_stuff("I'm updated")
+            self.catch_up_update(msg.data['states'])
+            if self.can_deliver:
+                self.deliver(len(self.states)-1)
 
         print_stuff('\n')
