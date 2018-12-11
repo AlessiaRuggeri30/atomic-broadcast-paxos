@@ -34,9 +34,9 @@ class Msg():
     def __str__(self):
         return str((self.instance, self.phase, self.data))
 
-    def fill_REQUEST(self, v):
+    def fill_REQUEST(self, v, instance=None):
         self.phase = "REQUEST"
-        self.data = {"v": v}
+        self.data = {"v": v, "instance": instance}
 
     def fill_PHASE_1A(self, c_rnd):
         self.phase = "PHASE_1A"
@@ -215,12 +215,12 @@ class Proposer(Agent):
 
     def update_state(self, instance):
         if instance is not None and instance not in self.states:
-            self.states[instance] = {"c_rnd": 0, "c_val": None, "v": None,
+            self.states[instance] = {"c_rnd": self.p_id, "c_val": None, "v": None,
                                      "max_v_rnd": 0, "max_v_val": 0,
                                      "quorum1B": 0, "quorum2B": 0}
 
     def phase_1A(self, instance):
-        self.states[instance]['c_rnd'] = self.p_id
+        self.states[instance]['c_rnd'] = self.states[instance]['c_rnd'] + 1000   # assuming that the max number of proposers is 1000
         msg = Msg(instance)
         msg.fill_PHASE_1A(self.states[instance]['c_rnd'])
         msg_encoded = msg.encode()
@@ -234,7 +234,7 @@ class Proposer(Agent):
         if data['v_rnd'] >= self.states[instance]['max_v_rnd']:
             self.states[instance]['max_v_rnd'] = data['v_rnd']
             self.states[instance]['max_v_val'] = data['v_val']
-        if self.states[instance]['quorum1B'] >= math.ceil((self.max_num_acceptors+1) / 2):  # if it has quorum of acceptors
+        if self.states[instance]['quorum1B'] >= math.ceil((self.max_num_acceptors+1) / 2):  # if it has quorum
             self.states[instance]['quorum1B'] = 0  # reset quorum
             if self.states[instance]['max_v_rnd'] == 0:
                 self.states[instance]['c_val'] = self.states[instance]['v']
@@ -250,7 +250,7 @@ class Proposer(Agent):
     def decide(self, instance, data):
         if data['v_rnd'] == self.states[instance]['c_rnd']:
             self.states[instance]['quorum2B'] += 1
-        if self.states[instance]['quorum2B'] >= math.ceil((self.max_num_acceptors+1) / 2):
+        if self.states[instance]['quorum2B'] >= math.ceil((self.max_num_acceptors+1) / 2):  # if it has quorum
             self.states[instance]['quorum2B'] = 0  # reset quorum
 
             msg = Msg(instance)
@@ -263,13 +263,17 @@ class Proposer(Agent):
         print_stuff(f"{self} receives msg {msg}")
 
         if msg.phase == "REQUEST":
-            self.update_state(self.num_instance)
-            self.states[self.num_instance]['v'] = msg.data['v']
+            if msg.data['instance'] is None:
+                self.update_state(self.num_instance)
+                num_instance = self.num_instance
+                self.num_instance += 1
+            else:
+                num_instance = int(msg.data['instance'])
+            self.states[num_instance]['v'] = msg.data['v']
             if not self.updated:
                 self.catch_up_request()
             if self.leader and self.updated:
-                self.phase_1A(self.num_instance)
-            self.num_instance += 1
+                self.phase_1A(num_instance)
         elif msg.phase == "PHASE_1B":
             if self.leader:
                 self.phase_2A(msg.instance, msg.data)
@@ -332,11 +336,11 @@ class Acceptor(Agent):
             msg_encoded = msg.encode()
             print_stuff(f"{self} sends msg {msg} to proposers")
             self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
-        elif role == "learners":
-            msg = Msg()
-            msg.fill_catch_up(states=self.states)
-            msg_encoded = msg.encode()
-            self.send_msg(self.network['learners']['ip'], self.network['learners']['port'], msg_encoded)
+        # elif role == "learners":
+        #     msg = Msg()
+        #     msg.fill_catch_up(states=self.states)
+        #     msg_encoded = msg.encode()
+        #     self.send_msg(self.network['learners']['ip'], self.network['learners']['port'], msg_encoded)
 
     def receive_msg(self, msg):
         print_stuff(f"{self} receives msg {msg}")
@@ -363,33 +367,25 @@ class Learner(Agent):
         self.can_deliver = True
         self.last_delivered = -1
         self.catch_up_counter = 0
+        self.num_instance = 0
 
-    def catch_up_request(self):
+    def catch_up_request(self, instance):
             msg = Msg()
-            msg.fill_catch_up(self.role)
+            msg.fill_REQUEST(None, instance=instance)
             msg_encoded = msg.encode()
-            print_stuff(f"{self} sends catch up request to acceptors")
-            self.send_msg(self.network['acceptors']['ip'], self.network['acceptors']['port'], msg_encoded)
-
-    # def run(self):
-    #     self.server.bind((self.ip, self.port))
-    #     print_stuff(f"{self} is listening")
-    #     self.catch_up_request()
-    #     while True:
-    #         encoded_msg, address = self.server.recvfrom(1024)
-    #         msg = Msg()
-    #         msg.decode(encoded_msg)
-    #         self.receive_msg(msg)
+            print_stuff(f"{self} sends catch up request to proposers")
+            self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
 
     def update_state(self, instance):
-        if instance is not None and instance not in self.states:
+        if instance not in self.states:
             self.states[instance] = {'v': None}
 
-    def deliver(self, instance):
-        for i in range((self.last_delivered + 1), (instance + 1)):
-            print_stuff(f"Instance {i}:")
-            print(self.states[i]['v'])
-        self.last_delivered = instance
+    def deliver(self):
+        for i in range((self.last_delivered + 1), (len(self.states))):
+            if i in self.states and self.states[i]['v'] is not None:
+                print_stuff(f"Instance {i}:")
+                print(self.states[i]['v'])
+        self.last_delivered = len(self.states)-1
 
     def catch_up_update(self, acceptor_states):
         self.catch_up_counter += 1
@@ -412,19 +408,21 @@ class Learner(Agent):
         print_stuff(f"{self} receives msg {msg}")
 
         if msg.phase == "DECISION":
-            for i in range(0, msg.instance):
+            if msg.instance > self.num_instance:
+                self.num_instance = msg.instance
+            self.update_state(msg.instance)
+            self.states[msg.instance]['v'] = msg.data['v_val']
+            self.can_deliver = True
+            for i in range(0, self.num_instance):
                 if i not in self.states:
+                    self.catch_up_request(i)
                     self.can_deliver = False
             print_stuff(f"Can deliver? {self.can_deliver}")
             if self.can_deliver:
-                self.update_state(msg.instance)
-                self.states[msg.instance]['v'] = msg.data['v_val']
-                self.deliver(msg.instance)
-            else:
-                self.catch_up_request()
-        elif msg.phase == "catch_up":
-            self.catch_up_update(msg.data['states'])
-            if self.can_deliver:
-                self.deliver(len(self.states)-1)
+                self.deliver()
+        # elif msg.phase == "catch_up":
+        #     self.catch_up_update(msg.data['states'])
+        #     if self.can_deliver:
+        #         self.deliver(len(self.states)-1)
 
         print_stuff('\n')
