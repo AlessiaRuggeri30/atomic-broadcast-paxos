@@ -62,9 +62,9 @@ class Msg():
         self.phase = "leader_sender"
         self.data = {"p_id": p_id}
 
-    def fill_catch_up(self, role=None, num_instance=None, states=None):
+    def fill_catch_up(self, num_instance=None):
         self.phase = "catch_up"
-        self.data = {"role": role, "num_instance": num_instance, "states": states}
+        self.data = {"num_instance": num_instance}
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -174,7 +174,7 @@ class Proposer(Agent):
 
     def catch_up_request(self):
         msg = Msg()
-        msg.fill_catch_up(self.role)
+        msg.fill_catch_up()
         msg_encoded = msg.encode()
         print_stuff(f"{self} sends catch up request to acceptors")
         self.send_msg(self.network['acceptors']['ip'], self.network['acceptors']['port'], msg_encoded)
@@ -328,19 +328,13 @@ class Acceptor(Agent):
             print_stuff(f"{self} sends msg {msg} to proposers")
             self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
 
-    def handle_catch_up(self, role):
-        if role == "proposers":
-            num_instance = len(self.states)
-            msg = Msg()
-            msg.fill_catch_up(num_instance=num_instance)
-            msg_encoded = msg.encode()
-            print_stuff(f"{self} sends msg {msg} to proposers")
-            self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
-        # elif role == "learners":
-        #     msg = Msg()
-        #     msg.fill_catch_up(states=self.states)
-        #     msg_encoded = msg.encode()
-        #     self.send_msg(self.network['learners']['ip'], self.network['learners']['port'], msg_encoded)
+    def handle_catch_up(self):
+        num_instance = len(self.states)
+        msg = Msg()
+        msg.fill_catch_up(num_instance=num_instance)
+        msg_encoded = msg.encode()
+        print_stuff(f"{self} sends msg {msg} to proposers")
+        self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
 
     def receive_msg(self, msg):
         print_stuff(f"{self} receives msg {msg}")
@@ -352,7 +346,7 @@ class Acceptor(Agent):
         elif msg.phase == "PHASE_2A":
             self.phase_2B(msg.instance, msg.data)
         elif msg.phase == "catch_up":
-            self.handle_catch_up(msg.data['role'])
+            self.handle_catch_up()
 
 
 class Learner(Agent):
@@ -362,12 +356,13 @@ class Learner(Agent):
     def __init__(self, *args, **kwargs):
         Agent.__init__(self, role="learners", *args, **kwargs)
         self.states = {}
-        self.acceptor_states = {}
-        self.max_num_acceptors = 3
         self.can_deliver = True
         self.last_delivered = -1
-        self.catch_up_counter = 0
         self.num_instance = 0
+
+        self.catch_up_control = Thread(target=self.catch_up_control)
+        self.catch_up_control.daemon = True
+        self.catch_up_control_interval = 2
 
     def catch_up_request(self, instance):
             msg = Msg()
@@ -375,6 +370,19 @@ class Learner(Agent):
             msg_encoded = msg.encode()
             print_stuff(f"{self} sends catch up request to proposers")
             self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
+
+    def run(self):
+        if not self.catch_up_control.is_alive():
+            self.catch_up_control.start()
+        super().run()
+
+    def catch_up_control(self):
+        while True:
+            time.sleep(self.catch_up_control_interval)
+            for i in range(0, self.num_instance):
+                if i not in self.states:
+                    self.catch_up_request(i)
+                    self.can_deliver = False
 
     def update_state(self, instance):
         if instance not in self.states:
@@ -386,23 +394,6 @@ class Learner(Agent):
                 print_stuff(f"Instance {i}:")
                 print(self.states[i]['v'])
         self.last_delivered = len(self.states)-1
-
-    def catch_up_update(self, acceptor_states):
-        self.catch_up_counter += 1
-        for instance in acceptor_states:
-            if instance is not None:
-                if instance not in self.acceptor_states:
-                    self.acceptor_states[instance] = acceptor_states[instance]
-                elif acceptor_states[instance]['v_rnd'] >= self.acceptor_states[instance]['v_rnd']:
-                    self.acceptor_states[instance] = acceptor_states[instance]
-
-        if self.catch_up_counter == math.ceil((self.max_num_acceptors + 1) / 2):
-            self.catch_up_counter = 0
-            for instance in self.acceptor_states:
-                if instance is not None and int(instance) not in self.states:
-                    self.states[int(instance)] = {'v': acceptor_states[instance]['v_val']}
-            self.can_deliver = True
-            print_stuff("I'm updated")
 
     def receive_msg(self, msg):
         print_stuff(f"{self} receives msg {msg}")
@@ -420,9 +411,4 @@ class Learner(Agent):
             print_stuff(f"Can deliver? {self.can_deliver}")
             if self.can_deliver:
                 self.deliver()
-        # elif msg.phase == "catch_up":
-        #     self.catch_up_update(msg.data['states'])
-        #     if self.can_deliver:
-        #         self.deliver(len(self.states)-1)
-
         print_stuff('\n')
