@@ -291,6 +291,8 @@ class Proposer(Agent):
                     self.num_instance = msg.data['num_instance']
                 if self.catch_up_counter == math.ceil((self.max_num_acceptors+1) / 2):
                     self.catch_up_counter = 0
+                    for i in range(0, self.num_instance):
+                        self.update_state(i)
                     self.updated = True
                     print_stuff("I'm updated")
 
@@ -302,6 +304,7 @@ class Acceptor(Agent):
     def __init__(self, *args, **kwargs):
         Agent.__init__(self, role="acceptors", *args, **kwargs)
         self.states = {}
+        self.num_instance = -1
 
     def update_state(self, instance):
         if instance is not None and instance not in self.states:
@@ -329,7 +332,7 @@ class Acceptor(Agent):
             self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
 
     def handle_catch_up(self):
-        num_instance = len(self.states)
+        num_instance = self.num_instance + 1
         msg = Msg()
         msg.fill_catch_up(num_instance=num_instance)
         msg_encoded = msg.encode()
@@ -340,6 +343,8 @@ class Acceptor(Agent):
         print_stuff(f"{self} receives msg {msg}")
 
         self.update_state(msg.instance)
+        if msg.instance is not None and msg.instance > self.num_instance:
+            self.num_instance = msg.instance
 
         if msg.phase == "PHASE_1A":
             self.phase_1B(msg.instance, msg.data)
@@ -358,7 +363,7 @@ class Learner(Agent):
         self.states = {}
         self.can_deliver = True
         self.last_delivered = -1
-        self.num_instance = 0
+        self.num_instance = -1
 
         self.catch_up_control = Thread(target=self.catch_up_control)
         self.catch_up_control.daemon = True
@@ -380,7 +385,7 @@ class Learner(Agent):
         while True:
             time.sleep(self.catch_up_control_interval)
             for i in range(0, self.num_instance):
-                if i not in self.states:
+                if i != -1 and i not in self.states:
                     self.catch_up_request(i)
                     self.can_deliver = False
 
@@ -392,14 +397,14 @@ class Learner(Agent):
         for i in range((self.last_delivered + 1), (len(self.states))):
             if i in self.states and self.states[i]['v'] is not None:
                 print_stuff(f"Instance {i}:")
-                print(self.states[i]['v'])
+                print(self.states[i]['v'])          # deliver
         self.last_delivered = len(self.states)-1
 
     def receive_msg(self, msg):
         print_stuff(f"{self} receives msg {msg}")
 
         if msg.phase == "DECISION":
-            if msg.instance > self.num_instance:
+            if msg.instance is not None and msg.instance > self.num_instance:
                 self.num_instance = msg.instance
             self.update_state(msg.instance)
             self.states[msg.instance]['v'] = msg.data['v_val']
