@@ -220,7 +220,6 @@ class Proposer(Agent):
                                      "quorum1B": 0, "quorum2B": 0}
 
     def phase_1A(self, instance):
-        self.states[instance]['c_rnd'] = self.states[instance]['c_rnd'] + 1000   # assuming that the max number of proposers is 1000
         msg = Msg(instance)
         msg.fill_PHASE_1A(self.states[instance]['c_rnd'])
         msg_encoded = msg.encode()
@@ -272,6 +271,8 @@ class Proposer(Agent):
             self.states[num_instance]['v'] = msg.data['v']
             if not self.updated:
                 self.catch_up_request()
+            # assuming that the max number of proposers is 1000
+            self.states[num_instance]['c_rnd'] = self.states[num_instance]['c_rnd'] + 1000
             if self.leader and self.updated:
                 self.phase_1A(num_instance)
         elif msg.phase == "PHASE_1B":
