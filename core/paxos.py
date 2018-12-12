@@ -6,18 +6,18 @@ MAX_NUM_ACCEPTORS = 3       # if you want more, change here
 
 
 def client(network, p_id):
-    print('-> client ', p_id)
+    # print('-> client ', p_id)
     client = Client(ip=network['clients']['ip'],
                     port=network['clients']['port'],
                     p_id=int(p_id),
                     network=network)
 
     client.run()
-    print('client done.')
+    # print('client done.')
 
 
 def proposer(network, p_id):
-    print('-> proposer', p_id)
+    # print('-> proposer', p_id)
     proposer = Proposer(ip=network['proposers']['ip'],
                         port=network['proposers']['port'],
                         p_id=int(p_id),
@@ -29,7 +29,7 @@ def proposer(network, p_id):
 
 
 def acceptor(network, p_id):
-    print('-> acceptor', p_id)
+    # print('-> acceptor', p_id)
     acceptor = Acceptor(ip=network['acceptors']['ip'],
                         port=network['acceptors']['port'],
                         p_id=int(p_id),
@@ -39,7 +39,7 @@ def acceptor(network, p_id):
 
 
 def learner(network, p_id):
-    print('-> learner ', p_id)
+    # print('-> learner ', p_id)
     learner = Learner(ip=network['learners']['ip'],
                       port=network['learners']['port'],
                       p_id=int(p_id),

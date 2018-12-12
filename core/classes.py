@@ -2,6 +2,7 @@ from threading import Thread
 import time
 import socket
 import struct
+import sys
 import json
 import math
 from utils import print_stuff
@@ -34,9 +35,9 @@ class Msg():
     def __str__(self):
         return str((self.instance, self.phase, self.data))
 
-    def fill_REQUEST(self, v, instance=None):
+    def fill_REQUEST(self, v):
         self.phase = "REQUEST"
-        self.data = {"v": v, "instance": instance}
+        self.data = {"v": v}
 
     def fill_PHASE_1A(self, c_rnd):
         self.phase = "PHASE_1A"
@@ -119,7 +120,7 @@ class Agent(Thread):
         self.server.bind((self.ip, self.port))
         print_stuff(f"{self} is listening")
         while True:
-            encoded_msg, address = self.server.recvfrom(1024)
+            encoded_msg, address = self.server.recvfrom(5120)
             msg = Msg()
             msg.decode(encoded_msg)
             self.receive_msg(msg)
@@ -140,8 +141,12 @@ class Client(Agent):
 
     def run(self):
         while True:
-            v = input("Request's value: ")
-            self.request(v)
+            # v = input()
+            # self.request(v)
+            for value in sys.stdin:
+                value = value.strip()
+                self.request(value)
+                time.sleep(0.001)
 
     def request(self, v):
         msg = Msg()
@@ -205,6 +210,7 @@ class Proposer(Agent):
 
     def leader_listener(self):
         while True:
+            time.sleep(0.001)
             if self.last_msg_leader_time is not None:
                 current_time = time.time()
                 interval = current_time - self.last_msg_leader_time
@@ -215,11 +221,12 @@ class Proposer(Agent):
 
     def update_state(self, instance):
         if instance is not None and instance not in self.states:
-            self.states[instance] = {"c_rnd": self.p_id, "c_val": None, "v": None,
+            self.states[instance] = {"c_rnd": self.p_id + 1, "c_val": None, "v": None,
                                      "max_v_rnd": 0, "max_v_val": 0,
                                      "quorum1B": 0, "quorum2B": 0}
 
     def phase_1A(self, instance):
+        # print("Phase 1A")
         msg = Msg(instance)
         msg.fill_PHASE_1A(self.states[instance]['c_rnd'])
         msg_encoded = msg.encode()
@@ -227,6 +234,7 @@ class Proposer(Agent):
         self.send_msg(self.network['acceptors']['ip'], self.network['acceptors']['port'], msg_encoded)
 
     def phase_2A(self, instance, data):
+        # print("Phase 2A")
         if data['rnd'] == self.states[instance]['c_rnd']:
             self.states[instance]['quorum1B'] += 1
         print_stuff(self.states[instance]['max_v_rnd'])
@@ -247,6 +255,7 @@ class Proposer(Agent):
             self.send_msg(self.network['acceptors']['ip'], self.network['acceptors']['port'], msg_encoded)
 
     def decide(self, instance, data):
+        # print("Deciding")
         if data['v_rnd'] == self.states[instance]['c_rnd']:
             self.states[instance]['quorum2B'] += 1
         if self.states[instance]['quorum2B'] >= math.ceil((self.max_num_acceptors+1) / 2):  # if it has quorum
@@ -261,13 +270,15 @@ class Proposer(Agent):
     def receive_msg(self, msg):
         print_stuff(f"{self} receives msg {msg}")
 
+        self.update_state(msg.instance)
+
         if msg.phase == "REQUEST":
-            if msg.data['instance'] is None:
+            if msg.instance is None:
                 self.update_state(self.num_instance)
                 num_instance = self.num_instance
                 self.num_instance += 1
             else:
-                num_instance = int(msg.data['instance'])
+                num_instance = int(msg.instance)
             self.states[num_instance]['v'] = msg.data['v']
             if not self.updated:
                 self.catch_up_request()
@@ -312,6 +323,7 @@ class Acceptor(Agent):
             self.states[instance] = {"rnd": 0, "v_rnd": 0, "v_val": None}
 
     def phase_1B(self, instance, data):
+        # print("Phase 1B")
         if data['c_rnd'] >= self.states[instance]['rnd']:
             self.states[instance]['rnd'] = data['c_rnd']
 
@@ -322,6 +334,7 @@ class Acceptor(Agent):
             self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
 
     def phase_2B(self, instance, data):
+        # print("Phase 2B")
         if data['c_rnd'] >= self.states[instance]['rnd']:
             self.states[instance]['v_rnd'] = data['c_rnd']
             self.states[instance]['v_val'] = data['c_val']
@@ -368,11 +381,11 @@ class Learner(Agent):
 
         self.catch_up_control = Thread(target=self.catch_up_control)
         self.catch_up_control.daemon = True
-        self.catch_up_control_interval = 2
+        self.catch_up_control_interval = 1
 
     def catch_up_request(self, instance):
-            msg = Msg()
-            msg.fill_REQUEST(None, instance=instance)
+            msg = Msg(instance)
+            msg.fill_REQUEST(None)
             msg_encoded = msg.encode()
             print_stuff(f"{self} sends catch up request to proposers")
             self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
@@ -398,7 +411,7 @@ class Learner(Agent):
         for i in range((self.last_delivered + 1), (len(self.states))):
             if i in self.states and self.states[i]['v'] is not None:
                 print_stuff(f"Instance {i}:")
-                print(self.states[i]['v'])          # deliver
+                print(self.states[i]['v'], flush=True)          # deliver
         self.last_delivered = len(self.states)-1
 
     def receive_msg(self, msg):
@@ -414,7 +427,7 @@ class Learner(Agent):
                 if i not in self.states:
                     self.catch_up_request(i)
                     self.can_deliver = False
-            print_stuff(f"Can deliver? {self.can_deliver}")
+            print_stuff(f" {self} Can deliver? {self.can_deliver}")
             if self.can_deliver:
                 self.deliver()
         print_stuff('\n')
