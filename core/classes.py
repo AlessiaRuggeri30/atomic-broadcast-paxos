@@ -17,9 +17,21 @@ from utils import print_stuff
 
 class Msg():
 
-    ''' Class representing a message '''
+    """ Class representing a message exchanged by processes.
+        It contains a method for each phase of the paxos algorithm
+        and for some additional phases. Each method fills the message
+        with the information related to that specific phase.
+    """
 
     def __init__(self, instance=None, phase=None, data=None):
+        """
+            :param instance: int, optional
+                The paxos instance to which the message is related.
+            :param phase: str, optional
+                The phase to which the message is related.
+            :param data: dict, optional
+                The information that this message is carrying.
+        """
         self.instance = instance
         self.phase = phase
         self.data = data
@@ -85,16 +97,28 @@ class Msg():
 
 class Agent(Thread):
 
-    ''' Generic class for paxos roles '''
+    """ Generic class representing paxos processes. It inherits from Thread. """
 
     def __init__(self, role, ip, port, p_id, network):
+        """
+            :param role: str
+                The paxos role of the process.
+            :param ip: str
+                The ip of the process.
+            :param port: int
+                The communication port of the process.
+            :param p_id: int
+                The process id.
+            :param network: dict
+                The network containing processes info.
+        """
         Thread.__init__(self)
         self.role = role
         self.ip = ip
         self.port = port
         self.p_id = p_id
-        self.server = self.setup_server()
-        self.client = self.setup_client()
+        self.server = self.setup_server()   # socket for the server side
+        self.client = self.setup_client()   # socket for the client side
         self.network = network
 
     def __str__(self):
@@ -131,7 +155,7 @@ class Agent(Thread):
             encoded_msg, address = self.server.recvfrom(2**16)
             msg = Msg()
             msg.decode(encoded_msg)
-            self.receive_msg(msg)
+            self.receive_msg(msg)       # behave in a specific way based on the process role
 
     def send_msg(self, ip, port, msg):
         self.client.sendto(msg, (ip, port))
@@ -157,6 +181,11 @@ class Client(Agent):
                 time.sleep(0.001)
 
     def request(self, v):
+        """ Send a request to proposers.
+
+                :param v: int or str
+                    Value to be proposed
+        """
         msg = Msg()
         msg.fill_REQUEST(v)
         msg_encoded = msg.encode()
@@ -166,26 +195,27 @@ class Client(Agent):
 
 class Proposer(Agent):
 
-    ''' Class representing proposer agent '''
+    """ Class representing proposer agent. """
 
     def __init__(self, *args, **kwargs):
         Agent.__init__(self, role="proposers", *args, **kwargs)
-        self.states = {}
-        self.leader = True
-        self.num_instance = -1
-        self.instance_updated = False
-        self.catch_up_counter = 0
-        self.max_num_acceptors = 3
+        self.states = {}                # for each paxos instance, it saves the related values
+        self.leader = True              # the proposer is or is not the leader
+        self.num_instance = -1          # greater instance identifying number seen
+        self.instance_updated = False   # the proposer is or is not up to date with num_instance
+        self.catch_up_counter = 0       # counter for quorum in the catch up phase
+        self.max_num_acceptors = 3      # needed to compute quorum
 
-        self.leader_sender = Thread(target=self.leader_sender)
-        self.leader_listener = Thread(target=self.leader_listener)
+        self.leader_sender = Thread(target=self.leader_sender)      # sends message if proposer is the leader
+        self.leader_listener = Thread(target=self.leader_listener)  # listen to the leader messages
         self.leader_sender.daemon = True
         self.leader_listener.daemon = True
-        self.leader_sender_interval = 1
-        self.leader_listener_interval = 2
-        self.last_msg_leader_time = None
+        self.leader_sender_interval = 1         # interval of seconds between leader_sender messages
+        self.leader_listener_interval = 2       # interval of seconds for leader_listener control
+        self.last_msg_leader_time = None        # time of the last message received from the leader
 
     def catch_up_instance(self):
+        """ Sends a message to acceptors to know the updated num_instance. """
         msg = Msg()
         msg.fill_catch_up_instance(role="proposers")
         msg_encoded = msg.encode()
@@ -193,22 +223,35 @@ class Proposer(Agent):
         self.send_msg(self.network['acceptors']['ip'], self.network['acceptors']['port'], msg_encoded)
 
     def catch_up_request(self, instance):
-            msg = Msg(instance)
-            msg.fill_REQUEST(None)
-            msg_encoded = msg.encode()
-            print_stuff(f"{self} sends catch up request to proposers")
-            self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
+        """ Sends a "client" request with specific instance to know the decision made in that instance.
+
+            :param instance: int
+                Number of the instance of which the proposer whant to know the decision made.
+         """
+        msg = Msg(instance)
+        msg.fill_REQUEST(None)
+        msg_encoded = msg.encode()
+        print_stuff(f"{self} sends catch up request to proposers")
+        self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
 
     def catch_up_control(self):
+        """ Check if the proposer is updated with all the instances in memory.
+            If not, it asks for the missing instances.
+        """
         for i in range(0, self.num_instance + 1):
             if i != -1 and i not in self.states:
                 self.catch_up_request(i)
 
     def handle_catch_up(self, msg):
-        if self.instance_updated:
+        """ Handles the receiving of a num_instance update sent by acceptors.
+
+            :param msg: class
+                Message received by acceptors
+        """
+        if self.instance_updated:       # proposer had already updated num_instance when it was born
             if msg.data['num_instance'] > self.num_instance:
                 self.num_instance = msg.data['num_instance']
-        else:
+        else:                           # first time updating num_instance
             self.catch_up_counter += 1
             if msg.data['num_instance'] > self.num_instance:
                 self.num_instance = msg.data['num_instance']
@@ -216,22 +259,26 @@ class Proposer(Agent):
                 self.catch_up_counter = 0
                 self.instance_updated = True
                 print_stuff("Instance updated")
-        self.catch_up_control()
+        self.catch_up_control()         # after having updated num_instance, check to have all instances in memory
 
     def catch_up_learners(self):
-            decisions = {}
-            for instance in self.states:
-                if self.states[instance]['c_val'] is not None:
-                    decisions[int(instance)] = int(self.states[instance]['c_val'])
-                else:
-                    decisions[int(instance)] = None
-            if len(decisions) == 0:
-                decisions = None
-            msg = Msg()
-            msg.fill_catch_up_learners(decisions)
-            msg_encoded = msg.encode()
-            print_stuff(f"{self} sends catch up learners to learners")
-            self.send_msg(self.network['learners']['ip'], self.network['learners']['port'], msg_encoded)
+        """ Handles the receiving of a request of update sent by learners.
+            The leader sends back to the learners a dictionary containing
+            all the values decided until now.
+        """
+        decisions = {}
+        for instance in self.states:
+            if self.states[instance]['c_val'] is not None:
+                decisions[int(instance)] = int(self.states[instance]['c_val'])
+            else:
+                decisions[int(instance)] = None
+        if len(decisions) == 0:
+            decisions = None
+        msg = Msg()
+        msg.fill_catch_up_learners(decisions)
+        msg_encoded = msg.encode()
+        print_stuff(f"{self} sends catch up learners to learners")
+        self.send_msg(self.network['learners']['ip'], self.network['learners']['port'], msg_encoded)
 
     def run(self):
         if not self.leader_sender.is_alive():
@@ -248,6 +295,7 @@ class Proposer(Agent):
             self.receive_msg(msg)
 
     def leader_sender(self):
+        """ Sends message if proposer is the leader. """
         while True:
             time.sleep(self.leader_sender_interval)
             if self.leader:
@@ -259,6 +307,7 @@ class Proposer(Agent):
                 self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
 
     def leader_listener(self):
+        """ Listen to the leader messages and check if it may be dead. """
         while True:
             time.sleep(0.001)
             if self.last_msg_leader_time is not None:
@@ -271,12 +320,17 @@ class Proposer(Agent):
                         self.catch_up_instance()
 
     def update_state(self, instance):
+        """ Add instance to the dictionary.
+                :param instance: int
+                    Instance to be added
+        """
         if instance is not None and instance not in self.states:
             self.states[int(instance)] = {"c_rnd": self.p_id + 1, "c_val": None, "v": None,
                                      "max_v_rnd": 0, "max_v_val": 0,
                                      "quorum1B": 0, "quorum2B": 0}
 
     def phase_1A(self, instance):
+        """ Handle phase 1A of Paxos algorithm. """
         # print("Phase 1A")
         msg = Msg(instance)
         msg.fill_PHASE_1A(self.states[instance]['c_rnd'])
@@ -285,6 +339,7 @@ class Proposer(Agent):
         self.send_msg(self.network['acceptors']['ip'], self.network['acceptors']['port'], msg_encoded)
 
     def phase_2A(self, instance, data):
+        """ Handle phase 2A of Paxos algorithm. """
         # print("Phase 2A")
         if data['rnd'] == self.states[instance]['c_rnd']:
             self.states[instance]['quorum1B'] += 1
@@ -306,6 +361,7 @@ class Proposer(Agent):
             self.send_msg(self.network['acceptors']['ip'], self.network['acceptors']['port'], msg_encoded)
 
     def decide(self, instance, data):
+        """ Handle phase decide of Paxos algorithm. """
         # print("Deciding")
         if data['v_rnd'] == self.states[instance]['c_rnd']:
             self.states[instance]['quorum2B'] += 1
@@ -320,16 +376,17 @@ class Proposer(Agent):
             self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
 
     def receive_msg(self, msg):
+        """ Handle the receiving of a new message. """
         print_stuff(f"{self} receives msg {msg}")
 
         self.update_state(msg.instance)
 
         if msg.phase == "REQUEST":
-            if msg.instance is None:
+            if msg.instance is None:        # request for a new instance
                 self.num_instance += 1
                 self.update_state(self.num_instance)
                 num_instance = self.num_instance
-            else:
+            else:                           # request for the value decided in an old instance
                 num_instance = int(msg.instance)
             self.states[num_instance]['v'] = msg.data['v']
             if not self.instance_updated:
@@ -362,18 +419,23 @@ class Proposer(Agent):
 
 class Acceptor(Agent):
 
-    ''' Class representing acceptor agent '''
+    """ Class representing acceptor agent. """
 
     def __init__(self, *args, **kwargs):
         Agent.__init__(self, role="acceptors", *args, **kwargs)
-        self.states = {}
-        self.num_instance = -1
+        self.states = {}            # for each paxos instance, it saves the related values
+        self.num_instance = -1      # greater instance identifying number seen
 
     def update_state(self, instance):
+        """ Add instance to the dictionary.
+                :param instance: int
+                    Instance to be added
+        """
         if instance is not None and instance not in self.states:
             self.states[instance] = {"rnd": 0, "v_rnd": 0, "v_val": None}
 
     def phase_1B(self, instance, data):
+        """ Handle phase 1B of Paxos algorithm. """
         # print("Phase 1B")
         if data['c_rnd'] >= self.states[instance]['rnd']:
             self.states[instance]['rnd'] = data['c_rnd']
@@ -385,6 +447,7 @@ class Acceptor(Agent):
             self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
 
     def phase_2B(self, instance, data):
+        """ Handle phase 2B of Paxos algorithm. """
         # print("Phase 2B")
         if data['c_rnd'] >= self.states[instance]['rnd']:
             self.states[instance]['v_rnd'] = data['c_rnd']
@@ -397,6 +460,11 @@ class Acceptor(Agent):
             self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
 
     def handle_catch_up(self, role):
+        """ Handles the receiving of the request of a num_instance update.
+
+            :param role: str
+                The role of the process that sent the update request.
+        """
         msg = Msg()
         msg.fill_catch_up_instance(num_instance=self.num_instance)
         msg_encoded = msg.encode()
@@ -404,6 +472,7 @@ class Acceptor(Agent):
         self.send_msg(self.network[role]['ip'], self.network[role]['port'], msg_encoded)
 
     def receive_msg(self, msg):
+        """ Handle the receiving of a new message. """
         print_stuff(f"{self} receives msg {msg}")
 
         self.update_state(msg.instance)
@@ -420,7 +489,7 @@ class Acceptor(Agent):
 
 class Learner(Agent):
 
-    ''' Class representing learner agent '''
+    """ Class representing learner agent. """
 
     def __init__(self, *args, **kwargs):
         Agent.__init__(self, role="learners", *args, **kwargs)
@@ -430,6 +499,7 @@ class Learner(Agent):
         self.num_instance = -1
 
     def catch_up_instance(self):
+        """ Sends a message to acceptors to know the updated num_instance. """
         msg = Msg()
         msg.fill_catch_up_instance(role="learners")
         msg_encoded = msg.encode()
@@ -437,13 +507,17 @@ class Learner(Agent):
         self.send_msg(self.network['acceptors']['ip'], self.network['acceptors']['port'], msg_encoded)
 
     def catch_up_learners(self):
-            msg = Msg()
-            msg.fill_catch_up_learners()
-            msg_encoded = msg.encode()
-            print_stuff(f"{self} sends catch up learners to proposers")
-            self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
+        """ Sends a message to proposers to know the updated decided values. """
+        msg = Msg()
+        msg.fill_catch_up_learners()
+        msg_encoded = msg.encode()
+        print_stuff(f"{self} sends catch up learners to proposers")
+        self.send_msg(self.network['proposers']['ip'], self.network['proposers']['port'], msg_encoded)
 
     def catch_up_control(self):
+        """ Check if the learner is updated with all the instances in memory.
+            If not, it asks for the missing instances.
+        """
         for i in range(0, self.num_instance + 1):
             if i != -1 and i not in self.states:
                 self.can_deliver = False
@@ -455,14 +529,25 @@ class Learner(Agent):
             self.deliver()
 
     def handle_catch_up(self, msg):
+        """ Handles the receiving of a num_instance update sent by acceptors.
+
+            :param msg: class
+                Message received by acceptors
+        """
         if msg.data['num_instance'] > self.num_instance:
-            if self.num_instance == -1:
+            if self.num_instance == -1:     # learner is just born and have to update also decide values
                 self.num_instance = msg.data['num_instance']
                 self.catch_up_control()
             else:
                 self.num_instance = msg.data['num_instance']
 
     def update_decisions(self, decisions):
+        """ Handles the receiving of a decisions update sent by the leader proposer.
+            It update the learner dictionary with the missing decisions.
+
+            :param decisions: dict
+                Dictionary of decisions sent by leader
+        """
         if decisions is not None:
             if len(decisions) - 1 > self.num_instance:
                 self.num_instance = len(decisions) - 1
@@ -483,10 +568,15 @@ class Learner(Agent):
             self.receive_msg(msg)
 
     def update_state(self, instance):
+        """ Add instance to the dictionary.
+                :param instance: int
+                    Instance to be added
+        """
         if instance not in self.states:
             self.states[instance] = {'v': None}
 
     def deliver(self):
+        """ Deliver all values from the last delivered to the maximum instance value. """
         for i in range((self.last_delivered + 1), (len(self.states))):
             if i in self.states and self.states[i]['v'] is not None:
                 print_stuff(f"Instance {i}:")
@@ -494,6 +584,7 @@ class Learner(Agent):
         self.last_delivered = len(self.states)-1
 
     def receive_msg(self, msg):
+        """ Handle the receiving of a new message. """
         print_stuff(f"{self} receives msg {msg}")
 
         if msg.phase == "DECISION":
